@@ -103,8 +103,10 @@ pub fn create_window(ctx: &mut Context, args: Vec<Object>) -> Object {
 
     let mut events_loop = glutin::EventsLoop::new();
     let window = glutin::WindowBuilder::new()
-        .with_dimensions((dim_x, dim_y).into());
-    let context = glutin::ContextBuilder::new();
+        .with_dimensions((dim_x, dim_y).into())
+        .with_title("MassLisp");
+    let context = glutin::ContextBuilder::new()
+        .with_vsync(true);
     let mut inputs = HashSet::new();
     if let Ok(display) = glium::Display::new(window, context, &events_loop) {
         let (dim_x, dim_y) = (dim_x as f32, dim_y as f32);
