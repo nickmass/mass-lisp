@@ -1,0 +1,14 @@
+[package]
+name = "lisp_web"
+version = "0.1.0"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+
+[dependencies]
+lisp = { path = "../lisp/" }
+wasm-bindgen = "0.2"

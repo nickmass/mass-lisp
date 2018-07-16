@@ -1,0 +1,14 @@
+[package]
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+name = "lisp"
+version = "0.1.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+glium = "0.22.0"
+rand = "0.5.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[dependencies]
+combine = "3.3.6"

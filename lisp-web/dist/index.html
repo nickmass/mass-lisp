@@ -1,0 +1,442 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Mass Lisp</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+         html, body {
+             margin: 0;
+             padding: 0;
+             width: 100%;
+             height: 100%;
+             font-family: sans-serif;
+         }
+
+         select {
+             display: block;
+             width: 100%;
+         }
+
+         #wrapper {
+             padding: 0 10px 0 10px;
+         }
+
+         #gfxWin {
+             margin: 5px;
+         }
+
+         #gfxWin canvas {
+             max-width: calc(100vw - 30px);
+             max-height: calc(80vh);
+             cursor: none;
+             user-select: none;
+         }
+
+         #consoleWin {
+             border: 1px solid black;
+             padding: 5px;
+             margin: 5px;
+         }
+
+         pre {
+             word-break: normal;
+             word-wrap: normal;
+             white-space: pre-wrap;
+         }
+
+         #consoleWin pre {
+             height: 50vh;
+             overflow: auto;
+         }
+
+         #consoleWin input {
+             display: block;
+             font-family: monospace;
+             margin: 0;
+             border: 1px solid black;
+             padding: 5px;
+             width: calc(100% - 12px);
+         }
+        </style>
+    </head>
+    <body>
+        <div id="wrapper">
+            <h1>Mass Lisp</h1>
+            <div id="selectDemo">
+                <label for="selDemo">Select Demo:</label>
+                <select id="selDemo">
+                    <option value="">Choose an Option...</option>
+                    <option value="./examples/game.lisp">Game</option>
+                    <option value="./examples/repl.lisp">REPL</option>
+                    <option value="./examples/bf.lisp">BF</option>
+                </select>
+            </div>
+            <div id="loadingWin" hidden>
+                <h1>Loading...</h1>
+            </div>
+            <div id="gfxWin" hidden></div>
+            <div id="consoleWin" hidden>
+                <pre id="consoleOutput"></pre>
+                <input id="consoleInput" type="text" />
+            </div>
+            <div id="codeWin" hidden>
+                <h1>Source Code</h1>
+                <pre><code id="codePane"></code></pre>
+            </div>
+        </div>
+    </body>
+    <script>
+     class MassLispGfx {
+         constructor(windowSpawn) {
+             this.windowSpawn = windowSpawn;
+             this.windows = [];
+         }
+
+         newWindow(width, height) {
+             let id = this.windows.length;
+             let container = this.windowSpawn(id);
+             let canvas = document.createElement('canvas');
+             canvas.setAttribute('width', width);
+             canvas.setAttribute('height', height);
+
+             let eventHandler = e => {
+                 let event = MassLispGfx.encodeEvent(e);
+                 this.windows[id].events.push(event);
+             };
+
+             canvas.addEventListener('mousedown', eventHandler);
+             canvas.addEventListener('mouseup', eventHandler);
+             document.addEventListener('keydown', eventHandler);
+             document.addEventListener('keyup', eventHandler);
+
+             let mouseMoveHandler = e => {
+                 let x = ((e.clientX - e.target.offsetLeft + window.scrollX) / e.target.clientWidth) * width;
+                 let y = ((e.clientY - e.target.offsetTop + window.scrollY) / e.target.clientHeight) * height;
+
+                 this.windows[id].mouse = {x: x, y: y};
+             };
+
+             canvas.addEventListener('mousemove', mouseMoveHandler);
+
+             let touchHandler = e => {
+                 let touch = e.targetTouches[0];
+                 if (touch) {
+                     let x = ((touch.clientX - touch.target.offsetLeft + window.scrollX) / touch.target.clientWidth) * width;
+                     let y = ((touch.clientY - touch.target.offsetTop + window.scrollY) / touch.target.clientHeight) * height;
+                     this.windows[id].mouse = {x: x, y: y};
+                 }
+
+                 let event = MassLispGfx.encodeEvent(e);
+                 this.windows[id].events.push(event);
+             };
+
+             canvas.addEventListener('touchstart', touchHandler);
+             canvas.addEventListener('touchend', touchHandler);
+             canvas.addEventListener('touchmove', e => e.preventDefault());
+
+             let removeHandlers = () => {
+                 canvas.removeEventListener('mousedown', eventHandler);
+                 canvas.removeEventListener('mouseup', eventHandler);
+                 document.removeEventListener('keydown', eventHandler);
+                 document.removeEventListener('keyup', eventHandler);
+                 canvas.removeEventListener('mousemove', mouseMoveHandler);
+                 canvas.removeEventListener('touchstart', touchHandler);
+                 canvas.removeEventListener('touchend', touchHandler);
+             };
+
+             let context = canvas.getContext('2d');
+             container.appendChild(canvas);
+             this.windows.push({running: true,
+                                cleanup: removeHandlers,
+                                events: [],
+                                commands: [],
+                                mouse: {x: 512, y: 512},
+                                container: container,
+                                canvas: canvas,
+                                context: context});
+
+             window.setTimeout(MassLisp.resume, 100);
+             return id;
+         }
+
+         pollEvents(win) {
+             let events = this.windows[win].events;
+             this.windows[win].events = [];
+
+             return events;
+         }
+
+         pollMouse(win) {
+             let mouse = [this.windows[win].mouse.x, this.windows[win].mouse.y];
+
+             return mouse;
+         }
+
+         setClearColor(win, color) {
+             this.windows[win].commands.push({type: 'clearColor', color: {r: color.r, g: color.g, b: color.b}});
+         }
+
+         setLineWidth(win, width) {
+             this.windows[win].commands.push({type: 'lineWidth', width: width - 1});
+         }
+
+         drawLineList(win, xCoords, yCoords, color) {
+             let points = [];
+             for (let idx = 0; idx < xCoords.length; idx++) {
+                 points.push({x: xCoords[idx], y: yCoords[idx]});
+             }
+             this.windows[win]
+                 .commands
+                 .push({type: 'lineList', points: points, color: {r: color.r, g: color.g, b: color.b}});
+         }
+
+         drawLine(win, start, end, color) {
+             this.windows[win]
+                 .commands
+                 .push({type: 'line', start: {x: start.x, y: start.y}, end: {x: end.x, y: end.y}, color: {r: color.r, g: color.g, b: color.b}});
+         }
+
+         drawCircle(win, center, radius, color) {
+             this.windows[win]
+                 .commands
+                 .push({type: 'circle', center: {x: center.x, y: center.y}, radius: radius, color: {r: color.r, g: color.g, b: color.b}});
+         }
+
+         draw(win) {
+             let target = this.windows[win];
+             let context = target.context;
+             let canvas = target.canvas;
+             if (!context || !canvas) return;
+             target.commands.forEach(command => {
+                 switch (command.type) {
+                     case 'clearColor':
+                         context.fillStyle = MassLispGfx.colorToString(command.color);
+                         context.fillRect(0, 0, canvas.width, canvas.height);
+                         break;
+                     case 'lineWidth':
+                         context.lineWidth = command.width;
+                         break;
+                     case 'lineList':
+                         context.strokeStyle = MassLispGfx.colorToString(command.color);
+                         let point = command.points.pop();
+                         if (point) {
+                             context.beginPath();
+                             context.moveTo(point.x, point.y);
+                             while (command.points.length != 0) {
+                                 let point = command.points.pop();
+                                 context.lineTo(point.x, point.y);
+                             }
+                             context.stroke();
+                         }
+                         break;
+                     case 'line':
+                         context.strokeStyle = MassLispGfx.colorToString(command.color);
+                         context.beginPath();
+                         context.moveTo(command.start.x, command.start.y);
+                         context.lineTo(command.end.x, command.end.y);
+                         context.stroke();
+                         break;
+                     case 'circle':
+                         context.strokeStyle = MassLispGfx.colorToString(command.color);
+                         context.fillStyle = MassLispGfx.colorToString(command.color);
+                         context.beginPath();
+                         context.arc(command.center.x, command.center.y, command.radius, 0, 2 * Math.PI);
+                         context.fill();
+                         break;
+                     default:
+                         console.warn(`Unexpected draw command: ${command.type}`);
+                         break;
+                 }
+             });
+
+             target.commands = [];
+
+             if (target.running) {
+                 requestAnimationFrame(() => {
+                     target.running = MassLisp.resume()
+                 });
+             }
+         }
+
+         shutdown() {
+             this.windows.forEach(w => {
+                 w.running = false;
+                 w.cleanup();
+                 if (w.canvas) {
+                     w.canvas.remove();
+                     delete w.context;
+                     delete w.canvas;
+                 }
+             })
+         }
+
+         static colorToString(color) {
+             let toInt = c => Math.floor(c * 255);
+             return `rgb(${toInt(color.r)}, ${toInt(color.g)}, ${toInt(color.b)})`;
+         }
+
+         static encodeEvent(e) {
+             let value = 0;
+
+             let mouse =  0x80000000;
+             let key =    0x40000000;
+             let pressed =0x20000000;
+
+             switch (e.type) {
+                 case 'mousedown':
+                     value = mouse | pressed;
+                     break;
+                 case 'mouseup':
+                     value = mouse;
+                     break;
+                 case 'keydown':
+                     value = (key | pressed) | (parseInt(e.which) & 0xFFFF);
+                     break;
+                 case 'keyup':
+                     value = (key | pressed) | (parseInt(e.which) & 0xFFFF);
+                     break;
+                 case 'touchstart':
+                     value = mouse | pressed;
+                     break;
+                 case 'touchend':
+                     value = mouse;
+                     break;
+             }
+
+             return value;
+         }
+
+     }
+
+     let massLispGfx = new MassLispGfx(id => {
+         let container = document.getElementById('gfxWin');
+         container.removeAttribute('hidden', 'hidden');
+         return container;
+     });
+
+     //Required on account of how wasm-bindgen makes its call
+     massLispGfx.newWindow = massLispGfx.newWindow.bind(massLispGfx);
+     massLispGfx.pollEvents = massLispGfx.pollEvents.bind(massLispGfx);
+     massLispGfx.pollMouse = massLispGfx.pollMouse.bind(massLispGfx);
+     massLispGfx.setClearColor = massLispGfx.setClearColor.bind(massLispGfx);
+     massLispGfx.setLineWidth = massLispGfx.setLineWidth.bind(massLispGfx);
+     massLispGfx.drawLineList = massLispGfx.drawLineList.bind(massLispGfx);
+     massLispGfx.drawLine = massLispGfx.drawLine.bind(massLispGfx);
+     massLispGfx.drawCircle = massLispGfx.drawCircle.bind(massLispGfx);
+     massLispGfx.draw = massLispGfx.draw.bind(massLispGfx);
+
+     class MassLispConsole {
+         constructor(input, output, onActivate) {
+             this.input = input;
+             this.output = output;
+             this.printedLines = [''];
+             this.readLines = [];
+             this.onActivate = onActivate;
+             this.active = false;
+
+             input.addEventListener('keypress', e => {
+                 if (e.key == 'Enter') {
+                     this.readLines.push(this.input.value);
+                     this.printLine(this.input.value);
+                     this.input.setAttribute('disabled', 'disabled');
+                     window.setTimeout(MassLisp.resume(), 100);
+                 }
+             });
+         }
+
+         printLine(line) {
+             this.print(line);
+             this.printedLines.push('');
+         }
+
+         activate() {
+             if (!this.active) {
+                 this.active = true;
+                 this.onActivate();
+             }
+         }
+
+         print(text) {
+             this.activate();
+             console.log(text);
+             let last = this.printedLines.length - 1;
+             this.printedLines[last] = this.printedLines[last] + text;
+             this.render();
+         }
+
+         readLine() {
+             this.activate();
+             let line = this.readLines.shift();
+             if (this.readLines.length == 0) {
+                 this.input.value = '';
+                 this.input.removeAttribute('disabled');
+                 this.input.focus();
+             }
+             console.log('> ' + line);
+             return line;
+         }
+
+         render() {
+             let lines = this.printedLines.join('\n');
+             this.output.innerHTML = lines;
+             this.output.scrollTop = 99999999999;
+         }
+
+         shutdown() {
+             this.printedLines = [''];
+             this.readLines = [];
+             this.active = false;
+             this.input.value = '';
+             this.input.removeAttribute('disabled');
+         }
+     }
+
+     let massLispConsole = new MassLispConsole(document.getElementById('consoleInput'),
+                                               document.getElementById('consoleOutput'),
+                                               () => {
+                                                   let container = document.getElementById('consoleWin');
+                                                   container.removeAttribute('hidden');
+                                               });
+
+     massLispConsole.printLine = massLispConsole.printLine.bind(massLispConsole);
+     massLispConsole.print = massLispConsole.print.bind(massLispConsole);
+     massLispConsole.readLine = massLispConsole.readLine.bind(massLispConsole);
+
+    </script>
+    <script src="./lisp_web.js"> </script>
+    <script>
+     let selector = document.getElementById("selDemo");
+     let gfxWin = document.getElementById('gfxWin');
+     let consoleWin = document.getElementById('consoleWin');
+     let loadingWin = document.getElementById('loadingWin');
+     let codeWin = document.getElementById('codeWin');
+     let codePane = document.getElementById('codePane');
+     selector.addEventListener("change", e => {
+         if (e.target.value) {
+             loadingWin.removeAttribute('hidden');
+             gfxWin.setAttribute('hidden', 'hidden');
+             consoleWin.setAttribute('hidden', 'hidden');
+             codeWin.setAttribute('hidden', 'hidden');
+             massLispGfx.shutdown();
+             massLispConsole.shutdown();
+             fetch(e.target.value)
+                 .then(res => res.text())
+                 .then(source => {
+                     codePane.innerHTML = source;
+                     codeWin.removeAttribute('hidden');
+                     return MassLisp('./lisp_web_bg_gc_opt.wasm').then(() => {
+                         MassLisp.reset();
+                         MassLisp.eval(source);
+                     });
+                 })
+                 .catch(error => {
+                     window.alert(`ERROR: ${error}`);
+                     console.error(error);
+                 })
+                 .finally(() => {
+                     loadingWin.setAttribute('hidden', 'hidden');
+                 });
+         }
+     });
+    </script>
+</html>
